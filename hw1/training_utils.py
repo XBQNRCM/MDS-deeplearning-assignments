@@ -137,7 +137,7 @@ def evaluate(model, test_loader, criterion, device):
 
 
 def train_model(model, train_loader, test_loader, num_epochs, optimizer, criterion, 
-                device, scheduler=None, augmentation=None, print_every=200):
+                device, scheduler=None, augmentation=None, print_every=1):
     """
     完整训练流程
     """

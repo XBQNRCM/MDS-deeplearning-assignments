@@ -1,0 +1,143 @@
+"""
+基于CIFAR10得到的最佳模型：Deeper/Wider + Residual
+结合了更深更宽的网络架构和残差连接机制
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class ResidualBlock(nn.Module):
+    """
+    残差块 - 解决梯度消失问题
+    """
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        
+        # 如果输入输出维度不同，需要调整维度
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+    
+    def forward(self, x):
+        residual = x
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(residual)
+        out = F.relu(out)
+        return out
+
+
+class BestModel(nn.Module):
+    """
+    最佳组合模型：Deeper/Wider + Residual
+    
+    对齐DeeperWiderCNN的8层卷积结构，在其基础上添加残差连接。
+    
+    特点：
+    1. 与DeeperWiderCNN相同的深度和宽度 (8层卷积)
+    2. 残差连接 - 解决梯度消失问题，提升训练效果
+    3. BatchNormalization - 加速训练，提高稳定性
+    4. Dropout - 防止过拟合
+    
+    架构对比 (与DeeperWiderCNN完全对齐):
+    - 第一组: Conv(3→128) + Conv(128→128) → 替换为 ResidualBlock(3→128, stride=1)
+    - 第二组: Conv(128→256) + Conv(256→256) → 替换为 ResidualBlock(128→256, stride=2)
+    - 第三组: Conv(256→512) + Conv(512→512) → 替换为 ResidualBlock(256→512, stride=2)
+    - 第四组: Conv(512→1024) + Conv(1024→1024) → 替换为 ResidualBlock(512→1024, stride=2)
+    
+    总计: 8层卷积 (4个ResidualBlock × 2层/block)
+    """
+    def __init__(self, num_classes=10):
+        super(BestModel, self).__init__()
+        
+        # 第一组残差块 - 128通道 (对应DeeperWiderCNN的第一层)
+        # DeeperWiderCNN: Conv(3→128) + Conv(128→128) + MaxPool + Dropout
+        self.res_block1 = ResidualBlock(3, 128, stride=1)
+        self.dropout1 = nn.Dropout(0.2)
+        
+        # 第二组残差块 - 256通道 (对应DeeperWiderCNN的第二层)
+        # DeeperWiderCNN: Conv(128→256) + Conv(256→256) + MaxPool + Dropout
+        self.res_block2 = ResidualBlock(128, 256, stride=2)
+        self.dropout2 = nn.Dropout(0.2)
+        
+        # 第三组残差块 - 512通道 (对应DeeperWiderCNN的第三层)
+        # DeeperWiderCNN: Conv(256→512) + Conv(512→512) + MaxPool + Dropout
+        self.res_block3 = ResidualBlock(256, 512, stride=2)
+        self.dropout3 = nn.Dropout(0.2)
+        
+        # 第四组残差块 - 1024通道 (对应DeeperWiderCNN的第四层)
+        # DeeperWiderCNN: Conv(512→1024) + Conv(1024→1024) + AdaptiveAvgPool
+        self.res_block4 = ResidualBlock(512, 1024, stride=2)
+        
+        # 全局平均池化 (与DeeperWiderCNN相同)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        
+        # 分类头 (与DeeperWiderCNN相同)
+        self.classifier = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(1024, 512), nn.ReLU(inplace=True), nn.Dropout(0.5),
+            nn.Linear(512, 256), nn.ReLU(inplace=True), nn.Dropout(0.5),
+            nn.Linear(256, num_classes),
+        )
+    
+    def forward(self, x):
+        # 第一组残差块 + Dropout (替代MaxPool后的Dropout)
+        x = self.res_block1(x)
+        x = self.dropout1(x)
+        
+        # 第二组残差块 + Dropout
+        x = self.res_block2(x)
+        x = self.dropout2(x)
+        
+        # 第三组残差块 + Dropout
+        x = self.res_block3(x)
+        x = self.dropout3(x)
+        
+        # 第四组残差块
+        x = self.res_block4(x)
+        
+        # 全局平均池化和分类
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        
+        return x
+    
+    def get_num_params(self):
+        """返回模型参数量"""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+def get_best_model(num_classes=10):
+    """
+    获取最佳模型实例
+    
+    Args:
+        num_classes: 分类类别数，CIFAR-10为10，Tiny-ImageNet为200
+    
+    Returns:
+        BestModel实例
+    """
+    model = BestModel(num_classes)
+    print(f"最佳模型参数量: {model.get_num_params() / 1_000_000:.2f}M")
+    return model
+
+
+if __name__ == "__main__":
+    # 测试模型
+    model = get_best_model(num_classes=10)
+    
+    # 测试前向传播
+    x = torch.randn(1, 3, 32, 32)
+    y = model(x)
+    print(f"输入形状: {x.shape}")
+    print(f"输出形状: {y.shape}")
+    print(f"模型参数量: {model.get_num_params() / 1_000_000:.2f}M")

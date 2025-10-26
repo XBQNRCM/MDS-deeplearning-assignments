@@ -42,6 +42,15 @@ hw1/
    - SE Block, Self-Attention
    - 实现：SEBlock, SelfAttention类
 
+### 最佳组合模型
+
+**BestModel** - Deeper/Wider + Residual
+- 结合了因子(a)残差连接和因子(b)更深更宽网络
+- 与DeeperWiderCNN对齐：8层卷积，4个残差块
+- 通道数：128→256→512→1024
+- 参数量：~20M
+- 预期性能提升：在CIFAR-10上可达92%+准确率
+
 ## 使用方法
 
 ### 环境要求
