@@ -6,15 +6,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-
 
 class BaselineCNN(nn.Module):
     """
     基线CNN模型 - 基于Example.ipynb的架构
     """
     def __init__(self, num_classes=10):
-        super(BaselineCNN, self).__init__()
+        super().__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 128, 3, padding=1), nn.ReLU(inplace=True), nn.MaxPool2d(2), nn.Dropout(0.3),
             nn.Conv2d(128, 256, 3, padding=1), nn.ReLU(inplace=True), nn.MaxPool2d(2), nn.Dropout(0.3),
@@ -41,7 +39,7 @@ class ResidualBlock(nn.Module):
     残差块 - 用于改进因子(a)
     """
     def __init__(self, in_channels, out_channels, stride=1):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1, bias=False)
@@ -69,7 +67,7 @@ class CNNWithResidual(nn.Module):
     带残差连接的CNN - 改进因子(a)
     """
     def __init__(self, num_classes=10):
-        super(CNNWithResidual, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(3, 64, 3, padding=1)
         self.bn1 = nn.BatchNorm2d(64)
         
@@ -97,7 +95,7 @@ class DeeperWiderCNN(nn.Module):
     更深更宽的CNN - 改进因子(b)
     """
     def __init__(self, num_classes=10):
-        super(DeeperWiderCNN, self).__init__()
+        super().__init__()
         self.features = nn.Sequential(
             # 第一层
             nn.Conv2d(3, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True),
@@ -121,10 +119,10 @@ class DeeperWiderCNN(nn.Module):
         )
         
         self.classifier = nn.Sequential(
-            nn.Dropout(0.5),
             nn.Linear(1024, 512), nn.ReLU(inplace=True), nn.Dropout(0.5),
             nn.Linear(512, 256), nn.ReLU(inplace=True), nn.Dropout(0.5),
-            nn.Linear(256, num_classes),
+            nn.Linear(256, 128), nn.ReLU(inplace=True), nn.Dropout(0.5),
+            nn.Linear(128, num_classes)
         )
     
     def forward(self, x):
@@ -136,145 +134,135 @@ class DeeperWiderCNN(nn.Module):
 
 class SEBlock(nn.Module):
     """
-    Squeeze-and-Excitation Block - 用于改进因子(e)
+    Squeeze-and-Excitation Block - 通道注意力机制
+
+    1. Squeeze: 全局平均池化，将空间信息压缩为通道描述符
+    2. Excitation: 两层全连接网络，学习通道间的依赖关系
+    3. Scale: 用学到的权重重新加权各通道
+    
+    参数量：2 * (C^2 / r) + 2C，其中r是reduction比例
     """
-    def __init__(self, channels, reduction=16):
-        super(SEBlock, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+    def __init__(self, in_channels, reduction=16):
+        super().__init__()
+        # Squeeze: 全局平均池化
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        
+        # Excitation: 两层全连接
         self.fc = nn.Sequential(
-            nn.Linear(channels, channels // reduction, bias=False),
+            nn.Linear(in_channels, in_channels // reduction, bias=False),
             nn.ReLU(inplace=True),
-            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Linear(in_channels // reduction, in_channels, bias=False),
             nn.Sigmoid()
         )
     
     def forward(self, x):
         b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
+        
+        # Squeeze: 全局平均池化 (b, c, h, w) -> (b, c, 1, 1) -> (b, c)
+        y = self.avgpool(x).view(b, c)
+        
+        # Excitation: 学习通道权重 (b, c) -> (b, c)
         y = self.fc(y).view(b, c, 1, 1)
+        
+        # Scale: 重新加权特征图
         return x * y.expand_as(x)
 
 
-class CNNWithSE(nn.Module):
+class CNNWithSEAttention(nn.Module):
     """
     带SE注意力的CNN - 改进因子(e)
+    
+    设计思路：
+    - 在每个卷积块后添加SE注意力模块
+    - 通过SE模块动态调整通道权重，强化重要特征
     """
     def __init__(self, num_classes=10):
-        super(CNNWithSE, self).__init__()
+        super().__init__()
+        
+        # 第一个卷积块: 3 -> 128
         self.conv1 = nn.Conv2d(3, 128, 3, padding=1)
         self.bn1 = nn.BatchNorm2d(128)
-        self.se1 = SEBlock(128)
+        self.se1 = SEBlock(128, reduction=16)
         
+        # 第二个卷积块: 128 -> 256
         self.conv2 = nn.Conv2d(128, 256, 3, padding=1)
         self.bn2 = nn.BatchNorm2d(256)
-        self.se2 = SEBlock(256)
+        self.se2 = SEBlock(256, reduction=16)
         
+        # 第三个卷积块: 256 -> 512
         self.conv3 = nn.Conv2d(256, 512, 3, padding=1)
         self.bn3 = nn.BatchNorm2d(512)
-        self.se3 = SEBlock(512)
+        self.se3 = SEBlock(512, reduction=16)
         
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512, num_classes)
+        # 第四个卷积块: 512 -> 512
+        self.conv4 = nn.Conv2d(512, 512, 3, padding=1)
+        self.bn4 = nn.BatchNorm2d(512)
+        self.se4 = SEBlock(512, reduction=16)
+        
+        # 第五个卷积块: 512 -> 256
+        self.conv5 = nn.Conv2d(512, 256, 3, padding=1)
+        self.bn5 = nn.BatchNorm2d(256)
+        self.se5 = SEBlock(256, reduction=16)
+        
+        # 分类器
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(256 * 4 * 4, 512), nn.ReLU(inplace=True), nn.Dropout(0.5),
+            nn.Linear(512, 256), nn.ReLU(inplace=True), nn.Dropout(0.5),
+            nn.Linear(256, 128), nn.ReLU(inplace=True), nn.Dropout(0.5),
+            nn.Linear(128, num_classes),
+        )
     
     def forward(self, x):
+        # 第一个块
         x = F.relu(self.bn1(self.conv1(x)))
         x = self.se1(x)
         x = F.max_pool2d(x, 2)
+        x = F.dropout(x, p=0.3, training=self.training)
         
+        # 第二个块
         x = F.relu(self.bn2(self.conv2(x)))
         x = self.se2(x)
         x = F.max_pool2d(x, 2)
+        x = F.dropout(x, p=0.3, training=self.training)
         
+        # 第三个块
         x = F.relu(self.bn3(self.conv3(x)))
         x = self.se3(x)
+        
+        # 第四个块
+        x = F.relu(self.bn4(self.conv4(x)))
+        x = self.se4(x)
+        
+        # 第五个块
+        x = F.relu(self.bn5(self.conv5(x)))
+        x = self.se5(x)
         x = F.max_pool2d(x, 2)
+        x = F.dropout(x, p=0.3, training=self.training)
         
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-        return x
-
-
-class SelfAttention(nn.Module):
-    """
-    自注意力机制 - 用于改进因子(e)
-    """
-    def __init__(self, in_channels):
-        super(SelfAttention, self).__init__()
-        self.in_channels = in_channels
-        self.query = nn.Conv2d(in_channels, in_channels // 8, 1)
-        self.key = nn.Conv2d(in_channels, in_channels // 8, 1)
-        self.value = nn.Conv2d(in_channels, in_channels, 1)
-        self.gamma = nn.Parameter(torch.zeros(1))
-    
-    def forward(self, x):
-        b, c, h, w = x.size()
-        query = self.query(x).view(b, -1, h * w).permute(0, 2, 1)
-        key = self.key(x).view(b, -1, h * w)
-        value = self.value(x).view(b, -1, h * w)
-        
-        attention = torch.bmm(query, key)
-        attention = F.softmax(attention, dim=-1)
-        
-        out = torch.bmm(value, attention.permute(0, 2, 1))
-        out = out.view(b, c, h, w)
-        
-        return self.gamma * out + x
-
-
-class CNNWithSelfAttention(nn.Module):
-    """
-    带自注意力的CNN - 改进因子(e)
-    """
-    def __init__(self, num_classes=10):
-        super(CNNWithSelfAttention, self).__init__()
-        self.conv1 = nn.Conv2d(3, 128, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(128)
-        self.attention1 = SelfAttention(128)
-        
-        self.conv2 = nn.Conv2d(128, 256, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(256)
-        self.attention2 = SelfAttention(256)
-        
-        self.conv3 = nn.Conv2d(256, 512, 3, padding=1)
-        self.bn3 = nn.BatchNorm2d(512)
-        self.attention3 = SelfAttention(512)
-        
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512, num_classes)
-    
-    def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.attention1(x)
-        x = F.max_pool2d(x, 2)
-        
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = self.attention2(x)
-        x = F.max_pool2d(x, 2)
-        
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = self.attention3(x)
-        x = F.max_pool2d(x, 2)
-        
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
+        # 分类
+        x = self.classifier(x)
         return x
 
 
 def get_model(model_name, num_classes=10):
     """
     获取指定模型
+    
+    可用模型：
+    - baseline: 基线CNN模型
+    - residual: 带残差连接的CNN
+    - deeper_wider: 更深更宽的CNN
+    - se_attention: 带SE注意力的CNN
     """
     models = {
         'baseline': BaselineCNN,
         'residual': CNNWithResidual,
         'deeper_wider': DeeperWiderCNN,
-        'se_attention': CNNWithSE,
-        'self_attention': CNNWithSelfAttention,
+        'se_attention': CNNWithSEAttention,
     }
     
     if model_name not in models:
-        raise ValueError(f"Unknown model: {model_name}")
+        raise ValueError(f"Unknown model: {model_name}. Available models: {list(models.keys())}")
     
     return models[model_name](num_classes)
