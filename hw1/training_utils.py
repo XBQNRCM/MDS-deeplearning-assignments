@@ -77,23 +77,31 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
     correct = 0
     total = 0
     
+    # 初始化 batch 增强方法（移到循环外部）
+    mixup_fn = None
+    cutmix_fn = None
+    if augmentation == 'mixup':
+        from data_augmentation import MixUp
+        mixup_fn = MixUp(alpha=1.0)
+        mixup_loss_fn = MixUpLoss(criterion)
+    elif augmentation == 'cutmix':
+        from data_augmentation import CutMix
+        cutmix_fn = CutMix(alpha=1.0)
+        cutmix_loss_fn = CutMixLoss(criterion)
+    
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         
         optimizer.zero_grad()
         
-        if augmentation == 'mixup':
-            from data_augmentation import MixUp
-            mixup = MixUp(alpha=1.0)
-            data, y_a, y_b, lam = mixup(data, target)
+        if mixup_fn is not None:
+            data, y_a, y_b, lam = mixup_fn(data, target)
             output = model(data)
-            loss = MixUpLoss(criterion)(output, y_a, y_b, lam)
-        elif augmentation == 'cutmix':
-            from data_augmentation import CutMix
-            cutmix = CutMix(alpha=1.0)
-            data, y_a, y_b, lam = cutmix(data, target)
+            loss = mixup_loss_fn(output, y_a, y_b, lam)
+        elif cutmix_fn is not None:
+            data, y_a, y_b, lam = cutmix_fn(data, target)
             output = model(data)
-            loss = CutMixLoss(criterion)(output, y_a, y_b, lam)
+            loss = cutmix_loss_fn(output, y_a, y_b, lam)
         else:
             output = model(data)
             loss = criterion(output, target)
