@@ -225,8 +225,8 @@ def get_optimizer_config(optimizer_name):
     """
     configs = {
         'Adam': {
-            'lr': 1e-3,
-            'weight_decay': 1e-4,
+            'lr': 3e-4,
+            'weight_decay': 1e-6,
         },
         'AdamW': {
             'lr': 1e-3,
