@@ -99,7 +99,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, augmentation=
             loss = criterion(output, target)
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
-            correct += (predicted == target).sum().item()
+            correct += (predicted == target).sum().item()  # mixup和cutmix的label是混合的，不方便计算accuracy
         
         loss.backward()
         optimizer.step()
@@ -145,8 +145,16 @@ def train_model(model, train_loader, test_loader, num_epochs, optimizer, criteri
     best_acc = 0.0
     best_model_state = None
     
-    print(f"开始训练，使用设备: {device}")
+    # 获取设备信息
+    device_name = str(device)
+    if device.type == 'cuda':
+        device_name = f"{device} ({torch.cuda.get_device_name(device)})"
+    
+    print(f"开始训练，使用设备: {device_name}")
     print(f"模型参数量: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1_000_000:.2f}M")
+    
+    # 记录训练开始时间
+    training_start_time = time.time()
     
     for epoch in range(num_epochs):
         start_time = time.time()
@@ -185,10 +193,20 @@ def train_model(model, train_loader, test_loader, num_epochs, optimizer, criteri
                   f'LR: {optimizer.param_groups[0]["lr"]:.6f}, '
                   f'Time: {epoch_time:.2f}s')
     
+    # 计算总训练时间
+    total_training_time = time.time() - training_start_time
+    hours = int(total_training_time // 3600)
+    minutes = int((total_training_time % 3600) // 60)
+    seconds = int(total_training_time % 60)
+    
     # 加载最佳模型
     if best_model_state:
         model.load_state_dict(best_model_state)
+        print(f"\n{'='*60}")
+        print(f"训练完成!")
         print(f"最佳测试准确率: {best_acc:.2f}%")
+        print(f"总训练时间: {hours:02d}:{minutes:02d}:{seconds:02d} ({total_training_time:.2f}秒)")
+        print(f"{'='*60}")
     
     return history
 
