@@ -153,13 +153,21 @@ def train_model(model, train_loader, test_loader, num_epochs, optimizer, criteri
     best_acc = 0.0
     best_model_state = None
     
-    # 获取设备信息
-    device_name = str(device)
-    if device.type == 'cuda':
+    # 获取设备信息和多GPU状态
+    is_multi_gpu = isinstance(model, nn.DataParallel)
+    if is_multi_gpu:
+        gpu_ids = model.device_ids
+        device_name = f"DataParallel on {len(gpu_ids)} GPUs: {gpu_ids}"
+        model_for_params = model.module
+    elif device.type == 'cuda':
         device_name = f"{device} ({torch.cuda.get_device_name(device)})"
+        model_for_params = model
+    else:
+        device_name = str(device)
+        model_for_params = model
     
     print(f"开始训练，使用设备: {device_name}")
-    print(f"模型参数量: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1_000_000:.2f}M")
+    print(f"模型参数量: {sum(p.numel() for p in model_for_params.parameters() if p.requires_grad) / 1_000_000:.2f}M")
     
     # 记录训练开始时间
     training_start_time = time.time()
