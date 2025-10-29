@@ -237,17 +237,17 @@ def get_optimizer_config(optimizer_name):
             'weight_decay': 1e-6,
         },
         'AdamW': {
-            'lr': 1e-3,
-            'weight_decay': 1e-2,
+            'lr': 3e-4,
+            'weight_decay': 1e-6,
         },
         'SGD': {
             'lr': 0.1,
-            'weight_decay': 1e-4,
+            'weight_decay': 1e-6,
             'momentum': 0.9,
         },
         'RMSprop': {
-            'lr': 1e-3,
-            'weight_decay': 1e-4,
+            'lr': 3e-4,
+            'weight_decay': 1e-6,
         }
     }
     return configs.get(optimizer_name, configs['Adam'])
